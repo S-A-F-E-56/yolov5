@@ -1,0 +1,5 @@
+names: [sarung_tangan, jas_laboratorium, kacamata_pelindung]
+nc: 3
+test: ../test/images
+train: ../train/images
+val: ../valid/images
