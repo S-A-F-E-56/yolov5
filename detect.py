@@ -71,7 +71,7 @@ from utils.torch_utils import select_device, smart_inference_mode
 @smart_inference_mode()
 def run(
     weights=str(Path('/yolov5/best.pt')),  # model path or triton URL
-    source=0,  # file/dir/URL/glob/screen/0(webcam)
+    source=ROOT / "data/images/IMG-20240721-WA0018.jpg",  # file/dir/URL/glob/screen/0(webcam)
     data=ROOT / "data/data.yaml",  # dataset.yaml path
     imgsz=(640, 640),  # inference size (height, width)
     conf_thres=0.25,  # confidence threshold
@@ -362,7 +362,7 @@ def parse_opt():
     """
     parser = argparse.ArgumentParser()
     parser.add_argument("--weights", nargs="+", type=str, default=str(Path('yolov5/best.pt')), help="model path or triton URL")
-    parser.add_argument("--source", type=str, default=0, help="file/dir/URL/glob/screen/0(webcam)")
+    parser.add_argument("--source", type=str, default=ROOT / "data/images/IMG-20240721-WA0018.jpg", help="file/dir/URL/glob/screen/0(webcam)")
     parser.add_argument("--data", type=str, default=ROOT / "data/data.yaml", help="(optional) dataset.yaml path")
     parser.add_argument("--imgsz", "--img", "--img-size", nargs="+", type=int, default=[640], help="inference size h,w")
     parser.add_argument("--conf-thres", type=float, default=0.25, help="confidence threshold")
