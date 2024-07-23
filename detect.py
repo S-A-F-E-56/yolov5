@@ -263,6 +263,8 @@ def run(
                 for *xyxy, conf, cls in reversed(det):
                     c = int(cls)  # integer class
                     label = names[c] if hide_conf else f"{names[c]}"
+                    if label in required_labels:
+                        required_labels[label] += 1
                     confidence = float(conf)
                     confidence_str = f"{confidence:.2f}"
                     '''
