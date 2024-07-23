@@ -36,6 +36,7 @@ import sys
 from pathlib import Path
 import pathlib
 import torch
+import json
 
 temp = pathlib.PosixPath
 pathlib.PosixPath = pathlib.WindowsPath
@@ -74,7 +75,7 @@ def run(
     source=ROOT / "data/images/IMG-20240721-WA0018.jpg",  # file/dir/URL/glob/screen/0(webcam)
     data=ROOT / "data/data.yaml",  # dataset.yaml path
     imgsz=(640, 640),  # inference size (height, width)
-    conf_thres=0.25,  # confidence threshold
+    conf_thres=0.5,  # confidence threshold
     iou_thres=0.45,  # NMS IOU threshold
     max_det=1000,  # maximum detections per image
     device="",  # cuda device, i.e. 0 or 0,1,2,3 or cpu
@@ -89,8 +90,8 @@ def run(
     augment=False,  # augmented inference
     visualize=False,  # visualize features
     update=False,  # update all models
-    project=ROOT / "runs/detect",  # save results to project/name
-    name="exp",  # save results to project/name
+    project=ROOT / "D:/Code/SAFE/MQTT-YOLOV5/detectedIMG",  # save results to project/name
+    name="",  # save results to project/name
     exist_ok=False,  # existing project/name ok, do not increment
     line_thickness=3,  # bounding box thickness (pixels)
     hide_labels=False,  # hide labels
@@ -159,7 +160,7 @@ def run(
         source = check_file(source)  # download
 
     # Directories
-    save_dir = increment_path(Path(project) / name, exist_ok=exist_ok)  # increment run
+    save_dir = project  # increment run
     (save_dir / "labels" if save_txt else save_dir).mkdir(parents=True, exist_ok=True)  # make dir
 
     # Load model
@@ -214,9 +215,9 @@ def run(
         # pred = utils.general.apply_classifier(pred, classifier_model, im, im0s)
 
         # Define the path for the CSV file
-        csv_path = save_dir / "predictions.csv"
+        #csv_path = save_dir / "predictions.csv"
 
-        # Create or append to the CSV file
+        '''# Create or append to the CSV file
         def write_to_csv(image_name, prediction, confidence):
             """Writes prediction data for an image to a CSV file, appending if the file exists."""
             data = {"Image Name": image_name, "Prediction": prediction, "Confidence": confidence}
@@ -224,7 +225,7 @@ def run(
                 writer = csv.DictWriter(f, fieldnames=data.keys())
                 if not csv_path.is_file():
                     writer.writeheader()
-                writer.writerow(data)
+                writer.writerow(data)'''
 
         # Process predictions
         for i, det in enumerate(pred):  # per image
@@ -236,8 +237,9 @@ def run(
                 p, im0, frame = path, im0s.copy(), getattr(dataset, "frame", 0)
 
             p = Path(p)  # to Path
-            save_path = str(save_dir / p.name)  # im.jpg
-            txt_path = str(save_dir / "labels" / p.stem) + ("" if dataset.mode == "image" else f"_{frame}")  # im.txt
+            save_path = str(Path(project) / f"{p.stem}_detected{p.suffix}")  # im.jpg
+            # txt_path = str(save_dir / f"{Path(path).stem}_detected.txt")  # im.txt
+            json_path = str(Path(project) / f"{p.stem}_labels.json")
             s += "%gx%g " % im.shape[2:]  # print string
             gn = torch.tensor(im0.shape)[[1, 0, 1, 0]]  # normalization gain whwh
             imc = im0.copy() if save_crop else im0  # for save_crop
@@ -245,6 +247,12 @@ def run(
             if len(det):
                 # Rescale boxes from img_size to im0 size
                 det[:, :4] = scale_boxes(im.shape[2:], det[:, :4], im0.shape).round()
+
+                required_labels = {
+                'sarung_tangan': 0,
+                'jas_laboratorium': 0,
+                'kacamata_pelindung': 0
+                }
 
                 # Print results
                 for c in det[:, 5].unique():
@@ -260,13 +268,13 @@ def run(
 
                     if save_csv:
                         write_to_csv(p.name, label, confidence_str)
-
+                    '''
                     if save_txt:  # Write to file
                         xywh = (xyxy2xywh(torch.tensor(xyxy).view(1, 4)) / gn).view(-1).tolist()  # normalized xywh
                         line = (cls, *xywh, conf) if save_conf else (cls, *xywh)  # label format
                         with open(f"{txt_path}.txt", "a") as f:
                             f.write(("%g " * len(line)).rstrip() % line + "\n")
-
+                    '''
                     if save_img or save_crop or view_img:  # Add bbox to image
                         c = int(cls)  # integer class
                         label = None if hide_labels else (names[c] if hide_conf else f"{names[c]} {conf:.2f}")
@@ -275,6 +283,7 @@ def run(
                         save_one_box(xyxy, imc, file=save_dir / "crops" / names[c] / f"{p.stem}.jpg", BGR=True)
 
             # Stream results
+            '''
             im0 = annotator.result()
             if view_img:
                 if platform.system() == "Linux" and p not in windows:
@@ -283,11 +292,14 @@ def run(
                     cv2.resizeWindow(str(p), im0.shape[1], im0.shape[0])
                 cv2.imshow(str(p), im0)
                 cv2.waitKey(1)  # 1 millisecond
-
+            '''
             # Save results (image with detections)
             if save_img:
                 if dataset.mode == "image":
                     cv2.imwrite(save_path, im0)
+                    with open(json_path, 'w') as f:  # Save JSON data
+                        json.dump(required_labels, f)
+                '''    
                 else:  # 'video' or 'stream'
                     if vid_path[i] != save_path:  # new video
                         vid_path[i] = save_path
@@ -302,6 +314,7 @@ def run(
                         save_path = str(Path(save_path).with_suffix(".mp4"))  # force *.mp4 suffix on results videos
                         vid_writer[i] = cv2.VideoWriter(save_path, cv2.VideoWriter_fourcc(*"mp4v"), fps, (w, h))
                     vid_writer[i].write(im0)
+                    '''
 
         # Print time (inference-only)
         LOGGER.info(f"{s}{'' if len(det) else '(no detections), '}{dt[1].dt * 1E3:.1f}ms")
@@ -365,7 +378,7 @@ def parse_opt():
     parser.add_argument("--source", type=str, default=ROOT / "data/images/IMG-20240721-WA0018.jpg", help="file/dir/URL/glob/screen/0(webcam)")
     parser.add_argument("--data", type=str, default=ROOT / "data/data.yaml", help="(optional) dataset.yaml path")
     parser.add_argument("--imgsz", "--img", "--img-size", nargs="+", type=int, default=[640], help="inference size h,w")
-    parser.add_argument("--conf-thres", type=float, default=0.25, help="confidence threshold")
+    parser.add_argument("--conf-thres", type=float, default=0.5, help="confidence threshold")
     parser.add_argument("--iou-thres", type=float, default=0.45, help="NMS IoU threshold")
     parser.add_argument("--max-det", type=int, default=1000, help="maximum detections per image")
     parser.add_argument("--device", default="", help="cuda device, i.e. 0 or 0,1,2,3 or cpu")
@@ -380,8 +393,8 @@ def parse_opt():
     parser.add_argument("--augment", action="store_true", help="augmented inference")
     parser.add_argument("--visualize", action="store_true", help="visualize features")
     parser.add_argument("--update", action="store_true", help="update all models")
-    parser.add_argument("--project", default=ROOT / "runs/detect", help="save results to project/name")
-    parser.add_argument("--name", default="exp", help="save results to project/name")
+    parser.add_argument("--project", default=ROOT / "D:/Code/SAFE/MQTT-YOLOV5/detectedIMG", help="save results to project/name")
+    parser.add_argument("--name", default="", help="save results to project/name")
     parser.add_argument("--exist-ok", action="store_true", help="existing project/name ok, do not increment")
     parser.add_argument("--line-thickness", default=3, type=int, help="bounding box thickness (pixels)")
     parser.add_argument("--hide-labels", default=False, action="store_true", help="hide labels")
