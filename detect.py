@@ -72,7 +72,7 @@ from utils.torch_utils import select_device, smart_inference_mode
 @smart_inference_mode()
 def run(
     weights=str(Path('/yolov5/best.pt')),  # model path or triton URL
-    source=ROOT / "data/images/IMG-20240721-WA0018.jpg",  # file/dir/URL/glob/screen/0(webcam)
+    source=0,  # file/dir/URL/glob/screen/0(webcam)
     data=ROOT / "data/data.yaml",  # dataset.yaml path
     imgsz=(640, 640),  # inference size (height, width)
     conf_thres=0.5,  # confidence threshold
@@ -211,6 +211,12 @@ def run(
         with dt[2]:
             pred = non_max_suppression(pred, conf_thres, iou_thres, classes, agnostic_nms, max_det=max_det)
 
+        required_labels = {
+        'sarung_tangan': 0,
+        'jas_laboratorium': 0,
+        'kacamata_pelindung': 0
+        }
+
         # Second-stage classifier (optional)
         # pred = utils.general.apply_classifier(pred, classifier_model, im, im0s)
 
@@ -248,12 +254,6 @@ def run(
                 # Rescale boxes from img_size to im0 size
                 det[:, :4] = scale_boxes(im.shape[2:], det[:, :4], im0.shape).round()
 
-                required_labels = {
-                'sarung_tangan': 0,
-                'jas_laboratorium': 0,
-                'kacamata_pelindung': 0
-                }
-
                 # Print results
                 for c in det[:, 5].unique():
                     n = (det[:, 5] == c).sum()  # detections per class
@@ -265,8 +265,8 @@ def run(
                     label = names[c] if hide_conf else f"{names[c]}"
                     if label in required_labels:
                         required_labels[label] += 1
-                    confidence = float(conf)
-                    confidence_str = f"{confidence:.2f}"
+                    #confidence = float(conf)
+                    #confidence_str = f"{confidence:.2f}"
                     '''
                     if save_csv:
                         write_to_csv(p.name, label, confidence_str)
@@ -284,8 +284,28 @@ def run(
                     if save_crop:
                         save_one_box(xyxy, imc, file=save_dir / "crops" / names[c] / f"{p.stem}.jpg", BGR=True)
 
+                # Check if the required labels are met and the conditions for capturing an image are satisfied
+                if required_labels['sarung_tangan'] == 2 and required_labels['jas_laboratorium'] == 1 and required_labels['kacamata_pelindung'] == 1:
+                    # Save the image
+                    id_name = "satu"
+                    filename = f"detected_image_{id_name}.jpg"
+                    save_path = os.path.join(project, filename)
+                    cv2.imwrite(save_path, im0)
+                    '''
+                    # Save the labels to a text file (optional)
+                    with open(os.path.join(project, name, f"{os.path.basename(source)[:-4]}_labels.txt"), 'w') as f:
+                        for *xyxy, conf, cls in reversed(det):
+                            c = int(cls)  # integer class
+                            label = names[c] if hide_conf else f"{names[c]} {conf:.2f}"
+                            if label in required_labels:
+                                f.write(f"{label} {conf:.2f}\n")'''
+
+                    # Display a message (optional)
+                    cv2.putText(im0, "Image captured!", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
+
+
             # Stream results
-            '''
+            
             im0 = annotator.result()
             if view_img:
                 if platform.system() == "Linux" and p not in windows:
@@ -294,7 +314,7 @@ def run(
                     cv2.resizeWindow(str(p), im0.shape[1], im0.shape[0])
                 cv2.imshow(str(p), im0)
                 cv2.waitKey(1)  # 1 millisecond
-            '''
+            
             # Save results (image with detections)
             if save_img:
                 if dataset.mode == "image":
@@ -377,7 +397,7 @@ def parse_opt():
     """
     parser = argparse.ArgumentParser()
     parser.add_argument("--weights", nargs="+", type=str, default=str(Path('yolov5/best.pt')), help="model path or triton URL")
-    parser.add_argument("--source", type=str, default=ROOT / "data/images/IMG-20240721-WA0018.jpg", help="file/dir/URL/glob/screen/0(webcam)")
+    parser.add_argument("--source", type=str, default=0, help="file/dir/URL/glob/screen/0(webcam)")
     parser.add_argument("--data", type=str, default=ROOT / "data/data.yaml", help="(optional) dataset.yaml path")
     parser.add_argument("--imgsz", "--img", "--img-size", nargs="+", type=int, default=[640], help="inference size h,w")
     parser.add_argument("--conf-thres", type=float, default=0.5, help="confidence threshold")
