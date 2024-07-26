@@ -1,14 +1,12 @@
 import argparse
-import csv
 import os
 import platform
 import sys
 from pathlib import Path
 import pathlib
 import torch
-import json
 import time
-import testing
+import threading
 
 temp = pathlib.PosixPath
 pathlib.PosixPath = pathlib.WindowsPath
@@ -20,11 +18,10 @@ ROOT = Path(os.path.relpath(ROOT, Path.cwd()))  # relative
 
 from ultralytics.utils.plotting import Annotator, colors, save_one_box
 from models.common import DetectMultiBackend
-from utils.dataloaders import IMG_FORMATS, VID_FORMATS, LoadImages, LoadScreenshots, LoadStreams
+from utils.dataloaders import IMG_FORMATS, VID_FORMATS, LoadStreams
 from utils.general import (
     LOGGER,
     Profile,
-    check_file,
     check_img_size,
     check_imshow,
     check_requirements,
@@ -35,22 +32,13 @@ from utils.general import (
     print_args,
     scale_boxes,
     strip_optimizer,
-    xyxy2xywh,
 )
 from utils.torch_utils import select_device, smart_inference_mode
 
 capture_cooldown = False
 cooldown_time = 5
 cooldown_start_time = 0  # initialize cooldown start time to 0
-
-def main():
-    # Check if start=True was passed as an argument
-    if '--start=True' in sys.argv:
-        start = True
-    else:
-        start = False
-
-    print("Start:", start)
+total_waktu_deteksi = time.time()
 
 @smart_inference_mode()
 def run(
@@ -83,18 +71,16 @@ def run(
     dnn=False,  # use OpenCV DNN for ONNX inference
     vid_stride=1,  # video frame-rate stride
 ):
-    global capture_cooldown, cooldown_time, cooldown_start_time
+    global capture_cooldown, cooldown_time, cooldown_start_time, total_waktu_deteksi, waktu_tidak_deteksi
+
     source = str(source)
     save_img = not nosave and not source.endswith(".txt")  # save inference images
     is_file = Path(source).suffix[1:] in (IMG_FORMATS + VID_FORMATS)
     is_url = source.lower().startswith(("rtsp://", "rtmp://", "http://", "https://"))
     webcam = source.isnumeric() or source.endswith(".streams") or (is_url and not is_file)
-    screenshot = source.lower().startswith("screen")
-    if is_url and is_file:
-        source = check_file(source)  # download
 
     # Directories
-    save_dir = project  # increment run
+    save_dir = project  
     (save_dir / "labels" if save_txt else save_dir).mkdir(parents=True, exist_ok=True)  # make dir
 
     # Load model
@@ -109,11 +95,6 @@ def run(
         view_img = check_imshow(warn=True)
         dataset = LoadStreams(source, img_size=imgsz, stride=stride, auto=pt, vid_stride=vid_stride)
         bs = len(dataset)
-    elif screenshot:
-        dataset = LoadScreenshots(source, img_size=imgsz, stride=stride, auto=pt)
-    else:
-        dataset = LoadImages(source, img_size=imgsz, stride=stride, auto=pt, vid_stride=vid_stride)
-    vid_path, vid_writer = [None] * bs, [None] * bs
 
     # Run inference
     model.warmup(imgsz=(1 if pt or model.triton else bs, 3, *imgsz))  # warmup
@@ -162,10 +143,8 @@ def run(
 
             p = Path(p)  # to Path
             save_path = str(Path(project) / f"{p.stem}_detected{p.suffix}")  # im.jpg
-            # txt_path = str(save_dir / f"{Path(path).stem}_detected.txt")  # im.txt
-            json_path = str(Path(project) / f"{p.stem}_labels.json")
+
             s += "%gx%g " % im.shape[2:]  # print string
-            gn = torch.tensor(im0.shape)[[1, 0, 1, 0]]  # normalization gain whwh
             imc = im0.copy() if save_crop else im0  # for save_crop
             annotator = Annotator(im0, line_width=line_thickness, example=str(names))
             if len(det):
@@ -191,7 +170,11 @@ def run(
                     if save_crop:
                         save_one_box(xyxy, imc, file=save_dir / "crops" / names[c] / f"{p.stem}.jpg", BGR=True)
 
-            if required_labels['sarung_tangan'] == 2 and required_labels['jas_laboratorium'] == 1 and required_labels['kacamata_pelindung'] == 1:
+            labels_complete = (required_labels['sarung_tangan'] == 2 and
+                                required_labels['jas_laboratorium'] == 1 and
+                                required_labels['kacamata_pelindung'] == 1)
+                    
+            if labels_complete:
                 if not capture_cooldown:
                     # Save the image
                     id_name = "satu"
@@ -202,17 +185,16 @@ def run(
                     # Display a message (optional)
                     cv2.putText(im0, "Image captured!", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
 
-                    # Set cooldown flag and update cooldown start time
                     capture_cooldown = True
                     cooldown_start_time = time.time()
+                    total_waktu_deteksi = time.time()
+
 
                 elif capture_cooldown and time.time() - cooldown_start_time > cooldown_time:
-                    # Reset cooldown flag if cooldown time has passed
                     capture_cooldown = False
-
-
+            if not labels_complete:
+                waktu_tidak_deteksi = time.time()
             # Stream results
-            
             im0 = annotator.result()
             if view_img:
                 if platform.system() == "Linux" and p not in windows:
@@ -226,9 +208,11 @@ def run(
             if save_img:
                 if dataset.mode == "image":
                     cv2.imwrite(save_path, im0)
-                    with open(json_path, 'w') as f:  # Save JSON data
-                        json.dump(required_labels, f)
 
+        selisih_waktu = waktu_tidak_deteksi - total_waktu_deteksi
+        if selisih_waktu > 20:
+            LoadStreams.stop(LoadStreams.__class__)
+            return
         # Print time (inference-only)
         LOGGER.info(f"{s}{'' if len(det) else '(no detections), '}{dt[1].dt * 1E3:.1f}ms")
 

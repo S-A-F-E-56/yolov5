@@ -16,6 +16,7 @@ from pathlib import Path
 from threading import Thread
 from urllib.parse import urlparse
 
+import cv2
 import numpy as np
 import psutil
 import torch
@@ -429,10 +430,11 @@ class LoadImages:
 
 class LoadStreams:
     # YOLOv5 streamloader, i.e. `python detect.py --source 'rtsp://example.com/media.mp4'  # RTSP, RTMP, HTTP streams`
-    def __init__(self, sources="file.streams", img_size=640, stride=32, auto=True, transforms=None, vid_stride=1):
+    def __init__(self, sources="file.streams", img_size=640, stride=32, auto=True, transforms=None, vid_stride=1): 
         """Initializes a stream loader for processing video streams with YOLOv5, supporting various sources including
         YouTube.
         """
+        global cap
         torch.backends.cudnn.benchmark = True  # faster for fixed-size inference
         self.mode = "stream"
         self.img_size = img_size
@@ -480,6 +482,9 @@ class LoadStreams:
     def update(self, i, cap, stream):
         """Reads frames from stream `i`, updating imgs array; handles stream reopening on signal loss."""
         n, f = 0, self.frames[i]  # frame number, frame array
+        ret, frame = cap.read()
+        if not ret:
+            return False
         while cap.isOpened() and n < f:
             n += 1
             cap.grab()  # .read() = .grab() followed by .retrieve()
@@ -492,6 +497,11 @@ class LoadStreams:
                     self.imgs[i] = np.zeros_like(self.imgs[i])
                     cap.open(stream)  # re-open stream if signal was lost
             time.sleep(0.0)  # wait time
+        return True
+    
+    def stop(self):
+        cap.release()
+        cv2.destroyAllWindows()
 
     def __iter__(self):
         """Resets and returns the iterator for iterating over video frames or images in a dataset."""
