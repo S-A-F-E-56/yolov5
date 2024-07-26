@@ -2,12 +2,12 @@ import argparse
 import os
 import platform
 import sys
+import csv
 from pathlib import Path
 import pathlib
 import torch
 import time
 import threading
-import logging
 
 temp = pathlib.PosixPath
 pathlib.PosixPath = pathlib.WindowsPath
@@ -19,10 +19,11 @@ ROOT = Path(os.path.relpath(ROOT, Path.cwd()))  # relative
 
 from ultralytics.utils.plotting import Annotator, colors, save_one_box
 from models.common import DetectMultiBackend
-from utils.dataloaders import IMG_FORMATS, VID_FORMATS, LoadStreams
+from utils.dataloaders import IMG_FORMATS, VID_FORMATS, LoadImages, LoadScreenshots, LoadStreams
 from utils.general import (
     LOGGER,
     Profile,
+    check_file,
     check_img_size,
     check_imshow,
     check_requirements,
@@ -33,6 +34,7 @@ from utils.general import (
     print_args,
     scale_boxes,
     strip_optimizer,
+    xyxy2xywh,
 )
 from utils.torch_utils import select_device, smart_inference_mode
 
@@ -41,7 +43,6 @@ cooldown_time = 5
 cooldown_start_time = 0  # initialize cooldown start time to 0
 total_waktu_deteksi = time.time()
 
-logging.basicConfig(level=logging.DEBUG)
 
 @smart_inference_mode()
 def run(
@@ -74,8 +75,6 @@ def run(
     dnn=False,  # use OpenCV DNN for ONNX inference
     vid_stride=1,  # video frame-rate stride
 ):
-    logging.debug(f"Source: {source}")
-    dataset = LoadStreams(source, img_size=imgsz, stride=stride, auto=pt, vid_stride=vid_stride)
     global capture_cooldown, cooldown_time, cooldown_start_time, total_waktu_deteksi, waktu_tidak_deteksi
 
     source = str(source)
@@ -83,7 +82,10 @@ def run(
     is_file = Path(source).suffix[1:] in (IMG_FORMATS + VID_FORMATS)
     is_url = source.lower().startswith(("rtsp://", "rtmp://", "http://", "https://"))
     webcam = source.isnumeric() or source.endswith(".streams") or (is_url and not is_file)
-
+    screenshot = source.lower().startswith("screen")
+    if is_url and is_file:
+        source = check_file(source)  
+    
     # Directories
     save_dir = project  
     (save_dir / "labels" if save_txt else save_dir).mkdir(parents=True, exist_ok=True)  # make dir
@@ -100,6 +102,11 @@ def run(
         view_img = check_imshow(warn=True)
         dataset = LoadStreams(source, img_size=imgsz, stride=stride, auto=pt, vid_stride=vid_stride)
         bs = len(dataset)
+    elif screenshot:
+        dataset = LoadScreenshots(source, img_size=imgsz, stride=stride, auto=pt)
+    else:
+        dataset = LoadImages(source, img_size=imgsz, stride=stride, auto=pt, vid_stride=vid_stride)
+    vid_path, vid_writer = [None] * bs, [None] * bs
 
     # Run inference
     model.warmup(imgsz=(1 if pt or model.triton else bs, 3, *imgsz))  # warmup
@@ -131,6 +138,16 @@ def run(
         with dt[2]:
             pred = non_max_suppression(pred, conf_thres, iou_thres, classes, agnostic_nms, max_det=max_det)
 
+        csv_path = save_dir / "predictions.csv"
+        def write_to_csv(image_name, prediction, confidence):
+            """Writes prediction data for an image to a CSV file, appending if the file exists."""
+            data = {"Image Name": image_name, "Prediction": prediction, "Confidence": confidence}
+            with open(csv_path, mode="a", newline="") as f:
+                writer = csv.DictWriter(f, fieldnames=data.keys())
+                if not csv_path.is_file():
+                    writer.writeheader()
+                writer.writerow(data)
+
         required_labels = {
         'sarung_tangan': 0,
         'jas_laboratorium': 0,
@@ -148,8 +165,9 @@ def run(
 
             p = Path(p)  # to Path
             save_path = str(Path(project) / f"{p.stem}_detected{p.suffix}")  # im.jpg
-
+            txt_path = str(save_dir / "labels" / p.stem) + ("" if dataset.mode == "image" else f"_{frame}")  # im.txt
             s += "%gx%g " % im.shape[2:]  # print string
+            gn = torch.tensor(im0.shape)[[1, 0, 1, 0]]  # normalization gain whwh
             imc = im0.copy() if save_crop else im0  # for save_crop
             annotator = Annotator(im0, line_width=line_thickness, example=str(names))
             if len(det):
@@ -165,8 +183,20 @@ def run(
                 for *xyxy, conf, cls in reversed(det):
                     c = int(cls)  # integer class
                     label = names[c] if hide_conf else f"{names[c]}"
+                    confidence = float(conf)
+                    confidence_str = f"{confidence:.2f}"
+
                     if label in required_labels:
                         required_labels[label] += 1
+
+                    if save_csv:
+                        write_to_csv(p.name, label, confidence_str)
+
+                    if save_txt:  # Write to file
+                        xywh = (xyxy2xywh(torch.tensor(xyxy).view(1, 4)) / gn).view(-1).tolist()  # normalized xywh
+                        line = (cls, *xywh, conf) if save_conf else (cls, *xywh)  # label format
+                        with open(f"{txt_path}.txt", "a") as f:
+                            f.write(("%g " * len(line)).rstrip() % line + "\n")
 
                     if save_img or save_crop or view_img:  # Add bbox to image
                         c = int(cls)  # integer class
@@ -202,10 +232,6 @@ def run(
             # Stream results
             im0 = annotator.result()
             if view_img:
-                if platform.system() == "Linux" and p not in windows:
-                    windows.append(p)
-                    cv2.namedWindow(str(p), cv2.WINDOW_NORMAL | cv2.WINDOW_KEEPRATIO)  # allow window resize (Linux)
-                    cv2.resizeWindow(str(p), im0.shape[1], im0.shape[0])
                 cv2.imshow(str(p), im0)
                 cv2.waitKey(1)  # 1 millisecond
             
@@ -213,6 +239,20 @@ def run(
             if save_img:
                 if dataset.mode == "image":
                     cv2.imwrite(save_path, im0)
+                else:  # 'video' or 'stream'
+                    if vid_path[i] != save_path:  # new video
+                        vid_path[i] = save_path
+                        if isinstance(vid_writer[i], cv2.VideoWriter):
+                            vid_writer[i].release()  # release previous video writer
+                        if vid_cap:  # video
+                            fps = vid_cap.get(cv2.CAP_PROP_FPS)
+                            w = int(vid_cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+                            h = int(vid_cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+                        else:  # stream
+                            fps, w, h = 30, im0.shape[1], im0.shape[0]
+                        save_path = str(Path(save_path).with_suffix(".mp4"))  # force *.mp4 suffix on results videos
+                        vid_writer[i] = cv2.VideoWriter(save_path, cv2.VideoWriter_fourcc(*"mp4v"), fps, (w, h))
+                    vid_writer[i].write(im0)
 
         selisih_waktu = waktu_tidak_deteksi - total_waktu_deteksi
         if selisih_waktu > 20:
