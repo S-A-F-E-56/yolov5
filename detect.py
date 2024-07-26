@@ -7,6 +7,7 @@ import pathlib
 import torch
 import time
 import threading
+import logging
 
 temp = pathlib.PosixPath
 pathlib.PosixPath = pathlib.WindowsPath
@@ -40,6 +41,8 @@ cooldown_time = 5
 cooldown_start_time = 0  # initialize cooldown start time to 0
 total_waktu_deteksi = time.time()
 
+logging.basicConfig(level=logging.DEBUG)
+
 @smart_inference_mode()
 def run(
     weights=str(Path('/yolov5/best.pt')),  # model path or triton URL
@@ -71,6 +74,8 @@ def run(
     dnn=False,  # use OpenCV DNN for ONNX inference
     vid_stride=1,  # video frame-rate stride
 ):
+    logging.debug(f"Source: {source}")
+    dataset = LoadStreams(source, img_size=imgsz, stride=stride, auto=pt, vid_stride=vid_stride)
     global capture_cooldown, cooldown_time, cooldown_start_time, total_waktu_deteksi, waktu_tidak_deteksi
 
     source = str(source)

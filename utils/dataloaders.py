@@ -16,6 +16,7 @@ from pathlib import Path
 from threading import Thread
 from urllib.parse import urlparse
 
+import logging
 import cv2
 import numpy as np
 import psutil
@@ -435,6 +436,7 @@ class LoadStreams:
         YouTube.
         """
         global cap
+        logging.debug(f"Initializing LoadStreams with sources: {sources}")
         torch.backends.cudnn.benchmark = True  # faster for fixed-size inference
         self.mode = "stream"
         self.img_size = img_size
@@ -470,6 +472,9 @@ class LoadStreams:
             LOGGER.info(f"{st} Success ({self.frames[i]} frames {w}x{h} at {self.fps[i]:.2f} FPS)")
             self.threads[i].start()
         LOGGER.info("")  # newline
+        for i, img in enumerate(self.imgs):
+            if img is None:
+                logging.warning(f"Warning: Image {i} is None.")
 
         # check for common shapes
         s = np.stack([letterbox(x, img_size, stride=stride, auto=auto)[0].shape for x in self.imgs])

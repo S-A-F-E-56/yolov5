@@ -120,10 +120,15 @@ def replicate(im, labels):
 
 def letterbox(im, new_shape=(640, 640), color=(114, 114, 114), auto=True, scaleFill=False, scaleup=True, stride=32):
     """Resizes and pads image to new_shape with stride-multiple constraints, returns resized image, ratio, padding."""
+    if im is None:
+        print("Error: Received NoneType in letterbox.")
+        raise ValueError("Received NoneType in letterbox.")
     shape = im.shape[:2]  # current shape [height, width]
     if isinstance(new_shape, int):
         new_shape = (new_shape, new_shape)
-
+    if im is None:
+        print("Input gambar tidak valid.")
+        return None, None
     # Scale ratio (new / old)
     r = min(new_shape[0] / shape[0], new_shape[1] / shape[1])
     if not scaleup:  # only scale down, do not scale up (for better val mAP)
